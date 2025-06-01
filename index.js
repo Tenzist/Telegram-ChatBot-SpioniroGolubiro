@@ -41,18 +41,10 @@ const maps = {
 };
 
 
-// 📎 Команда /track — добавление игрока вручную по ссылке
-bot.onText(/\/track/, (msg) => {
-  const chatId = msg.chat.id;
-  maps.waitingForNickname.set(chatId, "awaitingTrackLink");
-  bot.sendMessage(chatId, "📎 Отправьте ссылку на игрока с сайта BattleMetrics:");
-});
-
 bot.setMyCommands([
-  // Обновлённые команды с эмодзи для лучшего UX
 
   { command: "/search", description: "🔍 Поиск игроков" },
-  // { command: "/track", description: "📎 Ввести ссылку вручную" },
+  { command: "/track", description: "📎 Ввести ссылку вручную" },
   { command: "/list", description: "📋 Список отслеживаемых" },
   { command: "/stop", description: "🛑 Удалить отслеживание" }
 ]);
@@ -72,6 +64,11 @@ bot.onText(/\/search/, (msg) => {
   });
 });
 
+bot.onText(/\/track/, (msg) => {
+  const chatId = msg.chat.id;
+  maps.waitingForNickname.set(chatId, "awaitingTrackLink");
+  bot.sendMessage(chatId, "📎 Отправьте ссылку на игрока с сайта BattleMetrics:");
+});
 
 bot.onText(/\/list/, async (msg) => {
   const chatId = msg.chat.id;
@@ -87,8 +84,6 @@ bot.onText(/\/list/, async (msg) => {
 
   bot.sendMessage(chatId, `📋 Отслеживаемые игроки:\n${message}`, { parse_mode: "HTML" });
 });
-
-
 
 
 bot.onText(/\/stop/, async (msg) => {
@@ -254,11 +249,7 @@ bot.on("callback_query", async (query) => {
     await bot.answerCallbackQuery(query.id, { text: "🗑 Игрок удалён из отслеживания." });
     return;
   }
-
-
-
 });
-
 
 const buildPlayerKeyboard = (players, hasNext, hasPrev) => {
   const inlineKeyboard = players.map(player => ([{ text: player.name, callback_data: `player:${player.id}` }]));
@@ -296,16 +287,6 @@ const getServerName = async (serverId) => {
     return (await res.json()).data?.attributes?.name || "Неизвестный сервер";
   } catch {
     return "Ошибка при получении сервера";
-  }
-};
-
-
-const getPlayerSessionStop = async (playerId) => {
-  try {
-    const res = await fetchPlayerSessions(playerId);
-    return (await res.json()).data?.[0]?.attributes?.stop || null;
-  } catch {
-    return null;
   }
 };
 
@@ -409,8 +390,6 @@ const checkTrackedPlayers = async () => {
   }
 };
 
-setInterval(checkTrackedPlayers, 20000);
-
 const fetchPlayerSessions = async (playerId) => {
   try {
     return await fetch(`https://api.battlemetrics.com/players/${playerId}/relationships/sessions`, { headers });
@@ -419,17 +398,6 @@ const fetchPlayerSessions = async (playerId) => {
     return { json: async () => ({ data: [] }) };
   }
 };
-
-
-const getSearchLabel = (mode) => {
-  switch (mode) {
-    case "last7": return "последнюю неделю";
-    case "last30": return "последний месяц";
-    case "global": return "всё время";
-    default: return "";
-  }
-};
-
 
 const addTrackedPlayer = (playerId, chatId) => {
   db.prepare("INSERT OR IGNORE INTO tracked (playerId, chatId) VALUES (?, ?)").run(playerId, chatId);
@@ -441,6 +409,8 @@ const removeTrackedPlayer = (playerId, chatId) => {
 
 const getTrackedPlayersByChat = (chatId) => {
   return db.prepare("SELECT playerId FROM tracked WHERE chatId = ?")
-    .all(chatId)
-    .map(row => row.playerId);
+  .all(chatId)
+  .map(row => row.playerId);
 };
+
+setInterval(checkTrackedPlayers, 20000);
