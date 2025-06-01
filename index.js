@@ -1,6 +1,8 @@
 import fetch from "node-fetch";
 import { configDotenv } from "dotenv";
 import TelegramBot from "node-telegram-bot-api";
+import db from './db.js';
+
 
 configDotenv();
 
@@ -38,16 +40,26 @@ const maps = {
   playerChats: new Map()
 };
 
+
+// 📎 Команда /track — добавление игрока вручную по ссылке
+bot.onText(/\/track/, (msg) => {
+  const chatId = msg.chat.id;
+  maps.waitingForNickname.set(chatId, "awaitingTrackLink");
+  bot.sendMessage(chatId, "📎 Отправьте ссылку на игрока с сайта BattleMetrics:");
+});
+
 bot.setMyCommands([
-  { command: "/search", description: "Поиск игроков" },
-  { command: "/track", description: "Ввести ссылку вручную" },
-  { command: "/list", description: "Список отслеживаемых" },
-  { command: "/stop", description: "Удалить отслеживание" }
+  // Обновлённые команды с эмодзи для лучшего UX
+
+  { command: "/search", description: "🔍 Поиск игроков" },
+  // { command: "/track", description: "📎 Ввести ссылку вручную" },
+  { command: "/list", description: "📋 Список отслеживаемых" },
+  { command: "/stop", description: "🛑 Удалить отслеживание" }
 ]);
 
 bot.onText(/\/search/, (msg) => {
   const chatId = msg.chat.id;
-  bot.sendMessage(chatId, "Выберите период поиска:", {
+  bot.sendMessage(chatId, "📅 Выберите период поиска:", {
     reply_markup: {
       inline_keyboard: [
         [
@@ -63,46 +75,40 @@ bot.onText(/\/search/, (msg) => {
 
 bot.onText(/\/list/, async (msg) => {
   const chatId = msg.chat.id;
-  const trackedPlayerIds = Array.from(maps.playerChats.entries())
-  .filter(([, chatIds]) => chatIds.has(chatId))
-  .map(([playerId]) => playerId);
-  
-  if (!trackedPlayerIds.length) return bot.sendMessage(chatId, "Вы никого не отслеживаете.");
-  
+  const trackedPlayerIds = getTrackedPlayersByChat(chatId);
+
+  if (!trackedPlayerIds.length) return bot.sendMessage(chatId, "📭 Вы никого не отслеживаете.");
 
   const names = await Promise.all(trackedPlayerIds.map(getPlayerName));
-  
-  const message = names.map((name, i) => `${i + 1}. <a href="https://www.battlemetrics.com/players/${trackedPlayerIds[i]}">${name}</a>\n"<i>\n</i>"`).join("\n");
-  bot.sendMessage(chatId, `Отслеживаемые игроки:\n${message}`, { parse_mode: "HTML" });
+
+  const message = names.map((name, i) =>
+    `${i + 1}. <a href="https://www.battlemetrics.com/players/${trackedPlayerIds[i]}">${name}</a>`
+  ).join("\n");
+
+  bot.sendMessage(chatId, `📋 Отслеживаемые игроки:\n${message}`, { parse_mode: "HTML" });
 });
+
 
 
 
 bot.onText(/\/stop/, async (msg) => {
   const chatId = msg.chat.id;
-
-  // Получаем список игроков, которых отслеживает данный чат
-  const trackedPlayerIds = Array.from(maps.playerChats.entries())
-    .filter(([, chatIds]) => chatIds.has(chatId))
-    .map(([playerId]) => playerId);
+  const trackedPlayerIds = getTrackedPlayersByChat(chatId);
 
   if (!trackedPlayerIds.length) {
-    return bot.sendMessage(chatId, "Вы никого не отслеживаете.");
+    return bot.sendMessage(chatId, "📭 Вы никого не отслеживаете.");
   }
 
   const names = await Promise.all(trackedPlayerIds.map(getPlayerName));
-
-  // Формируем inline клавиатуру: каждая кнопка — ник игрока с callback_data stop:<playerId>
   const inlineKeyboard = names.map((name, i) => [
     { text: name, callback_data: `stop:${trackedPlayerIds[i]}` }
   ]);
 
-  bot.sendMessage(chatId, "Выберите игрока для удаления из отслеживания:", {
-    reply_markup: {
-      inline_keyboard: inlineKeyboard
-    }
+  bot.sendMessage(chatId, "🗑 Выберите игрока для удаления из отслеживания:", {
+    reply_markup: { inline_keyboard: inlineKeyboard }
   });
 });
+
 
 
 bot.on("message", async (msg) => {
@@ -124,8 +130,24 @@ bot.on("message", async (msg) => {
     maps.searchMode.set(chatId, mode);
     maps.waitingForNickname.set(chatId, true);
 
-    return bot.sendMessage(chatId, "Введите ник игрока:");
+    return bot.sendMessage(chatId, "⌨️ Введите ник игрока:");
   }
+
+
+  if (maps.waitingForNickname.get(chatId) === "awaitingTrackLink") {
+    maps.waitingForNickname.delete(chatId);
+
+    const match = text.match(/battlemetrics\.com\/players\/(\d+)/);
+    if (!match) {
+      return bot.sendMessage(chatId, "❌ Неверная ссылка. Пример: https://www.battlemetrics.com/players/217865317");
+    }
+
+    const playerId = match[1];
+    addTrackedPlayer(playerId, chatId);
+    const playerName = await getPlayerName(playerId);
+    return bot.sendMessage(chatId, `✅ Игрок <b>${playerName}</b> добавлен в отслеживание.`, { parse_mode: "HTML" });
+  }
+
 
   if (!maps.waitingForNickname.get(chatId)) return;
 
@@ -144,10 +166,10 @@ bot.on("message", async (msg) => {
   }
 
   const { players, nextLink, prevLink, currentUrl } = result;
-  if (!players?.length) return bot.sendMessage(chatId, "Игроки не найдены.");
+  if (!players?.length) return bot.sendMessage(chatId, "❌ Игроки не найдены.");
 
   maps.searchState.set(chatId, { currentUrl, nextLink, prevLink, players });
-  bot.sendMessage(chatId, "Результаты:", buildPlayerKeyboard(players, !!nextLink, !!prevLink));
+  bot.sendMessage(chatId, "📊 Результаты:", buildPlayerKeyboard(players, !!nextLink, !!prevLink));
 });
 
 
@@ -157,7 +179,7 @@ bot.on("callback_query", async (query) => {
   const data = query.data;
   const state = maps.searchState.get(chatId);
 
-   if (data.startsWith("period:")) {
+  if (data.startsWith("period:")) {
     const mode = data.split(":")[1]; // last7, last30, global
 
     maps.searchMode.set(chatId, mode);
@@ -196,36 +218,25 @@ bot.on("callback_query", async (query) => {
   }
 
   if (data === "cancel") {
-    bot.sendMessage(chatId, "Отмена.");
+    bot.sendMessage(chatId, "❎ Отмена.");
     return bot.answerCallbackQuery(query.id);
   }
 
   if (data.startsWith("track:")) {
     const playerId = data.split(":")[1];
     addTrackedPlayer(playerId, chatId);
-    bot.sendMessage(chatId, "Игрок добавлен в отслеживание.");
+    bot.sendMessage(chatId, "✅ Игрок добавлен в отслеживание.");
     return bot.answerCallbackQuery(query.id);
   }
   if (data.startsWith("stop:")) {
     const playerIdToRemove = data.split(":")[1];
 
-    if (!maps.playerChats.has(playerIdToRemove) || !maps.playerChats.get(playerIdToRemove).has(chatId)) {
-      await bot.answerCallbackQuery(query.id, { text: "Этот игрок не отслеживается вами.", show_alert: true });
-      return;
-    }
+    removeTrackedPlayer(playerIdToRemove, chatId);
 
-    maps.playerChats.get(playerIdToRemove).delete(chatId);
-    if (maps.playerChats.get(playerIdToRemove).size === 0) {
-      maps.playerChats.delete(playerIdToRemove);
-      maps.trackedPlayers.delete(playerIdToRemove);
-    }
-
-    const trackedPlayerIds = Array.from(maps.playerChats.entries())
-      .filter(([, chatIds]) => chatIds.has(chatId))
-      .map(([playerId]) => playerId);
+    const trackedPlayerIds = getTrackedPlayersByChat(chatId);
 
     if (!trackedPlayerIds.length) {
-      await bot.editMessageText("Все игроки удаленны из отслеживания", {
+      await bot.editMessageText("Все игроки удалены из отслеживания", {
         chat_id: chatId,
         message_id: query.message.message_id
       });
@@ -240,18 +251,14 @@ bot.on("callback_query", async (query) => {
       });
     }
 
-    await bot.answerCallbackQuery(query.id, { text: "Игрок удалён из отслеживания." });
+    await bot.answerCallbackQuery(query.id, { text: "🗑 Игрок удалён из отслеживания." });
     return;
   }
+
+
+
 });
 
-const addTrackedPlayer = (playerId, chatId) => {
-  if (!maps.trackedPlayers.has(playerId)) {
-    getPlayerSessionStop(playerId).then(stop => maps.trackedPlayers.set(playerId, stop));
-  }
-  if (!maps.playerChats.has(playerId)) maps.playerChats.set(playerId, new Set());
-  maps.playerChats.get(playerId).add(chatId);
-};
 
 const buildPlayerKeyboard = (players, hasNext, hasPrev) => {
   const inlineKeyboard = players.map(player => ([{ text: player.name, callback_data: `player:${player.id}` }]));
@@ -274,7 +281,7 @@ const getPlayerName = async (playerId) => {
 
 const getOnlineStatus = async (playerId) => {
   try {
-    const res = await fetch(`https://api.battlemetrics.com/players/${playerId}/relationships/sessions`, { headers });
+    const res = await fetchPlayerSessions(playerId);
     const session = (await res.json()).data[0];
     if (!session) return "";
     return session.attributes.stop === null ? '🟢' : `(${utils.getLastSeen(session.attributes.stop)})`;
@@ -295,7 +302,7 @@ const getServerName = async (serverId) => {
 
 const getPlayerSessionStop = async (playerId) => {
   try {
-    const res = await fetch(`https://api.battlemetrics.com/players/${playerId}/relationships/sessions`, { headers });
+    const res = await fetchPlayerSessions(playerId);
     return (await res.json()).data?.[0]?.attributes?.stop || null;
   } catch {
     return null;
@@ -304,7 +311,7 @@ const getPlayerSessionStop = async (playerId) => {
 
 const getPlayerLastSession = async (playerId) => {
   try {
-    const res = await fetch(`https://api.battlemetrics.com/players/${playerId}/relationships/sessions`, { headers });
+    const res = await fetchPlayerSessions(playerId);
     return (await res.json()).data?.[0] || null;
   } catch {
     return null;
@@ -323,7 +330,7 @@ const getSessionServerName = async (session) => {
 
 const checkPlayerInfo = async (playerId, chatId) => {
   try {
-    const res = await fetch(`https://api.battlemetrics.com/players/${playerId}/relationships/sessions`, { headers });
+    const res = await fetchPlayerSessions(playerId);
     const session = (await res.json()).data?.[0];
     if (!session) return bot.sendMessage(chatId, "Сессии не найдены.");
 
@@ -387,8 +394,8 @@ const checkTrackedPlayers = async () => {
       const playerName = await getPlayerName(playerId);
       const serverName = await getSessionServerName(currentSession);
       const message = currentStop === null
-        ? `Игрок <b>${playerName}</b> зашёл в сеть на сервер "<i>${serverName}</i>".`
-        : `Игрок <b>${playerName}</b> вышел с сервера "<i>${serverName}</i>".`;
+        ? `🔔 Игрок <b>${playerName}</b> зашёл в сеть на сервер "<i>${serverName}</i>".`
+        : `🔔 Игрок <b>${playerName}</b> вышел с сервера "<i>${serverName}</i>".`;
 
       maps.trackedPlayers.set(playerId, currentStop);
 
@@ -403,3 +410,37 @@ const checkTrackedPlayers = async () => {
 };
 
 setInterval(checkTrackedPlayers, 20000);
+
+const fetchPlayerSessions = async (playerId) => {
+  try {
+    return await fetch(`https://api.battlemetrics.com/players/${playerId}/relationships/sessions`, { headers });
+  } catch (error) {
+    console.error("Ошибка при получении сессий игрока:", error);
+    return { json: async () => ({ data: [] }) };
+  }
+};
+
+
+const getSearchLabel = (mode) => {
+  switch (mode) {
+    case "last7": return "последнюю неделю";
+    case "last30": return "последний месяц";
+    case "global": return "всё время";
+    default: return "";
+  }
+};
+
+
+const addTrackedPlayer = (playerId, chatId) => {
+  db.prepare("INSERT OR IGNORE INTO tracked (playerId, chatId) VALUES (?, ?)").run(playerId, chatId);
+};
+
+const removeTrackedPlayer = (playerId, chatId) => {
+  db.prepare("DELETE FROM tracked WHERE playerId = ? AND chatId = ?").run(playerId, chatId);
+};
+
+const getTrackedPlayersByChat = (chatId) => {
+  return db.prepare("SELECT playerId FROM tracked WHERE chatId = ?")
+    .all(chatId)
+    .map(row => row.playerId);
+};

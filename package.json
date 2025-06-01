@@ -3,9 +3,9 @@
   "scripts": {
     "start": "nodemon index.js"
   },
-  
   "dependencies": {
     "battlemetrics-wrapper": "^0.2.0",
+    "better-sqlite3": "^11.10.0",
     "dotenv": "^16.5.0",
     "node-fetch": "^3.3.2",
     "node-telegram-bot-api": "^0.66.0",
