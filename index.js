@@ -366,12 +366,15 @@ const globalSearchPlayers = async (name) => {
 };
 
 const checkTrackedPlayers = async () => {
-  for (const [playerId, lastStop] of maps.trackedPlayers.entries()) {
+  const rows = db.prepare("SELECT DISTINCT playerId FROM tracked").all();
+
+  for (const { playerId } of rows) {
     const currentSession = await getPlayerLastSession(playerId);
     if (!currentSession) continue;
 
     const currentStop = currentSession.attributes.stop;
-    if (currentStop !== lastStop) {
+    const previousStop = maps.trackedPlayers.get(playerId);
+    if (previousStop !== currentStop) {
       const playerName = await getPlayerName(playerId);
       const serverName = await getSessionServerName(currentSession);
       const message = currentStop === null
@@ -380,15 +383,14 @@ const checkTrackedPlayers = async () => {
 
       maps.trackedPlayers.set(playerId, currentStop);
 
-      const chats = maps.playerChats.get(playerId);
-      if (chats) {
-        for (const chatId of chats) {
-          bot.sendMessage(chatId, message, { parse_mode: "HTML" });
-        }
+      const chatRows = db.prepare("SELECT chatId FROM tracked WHERE playerId = ?").all(playerId);
+      for (const { chatId } of chatRows) {
+        bot.sendMessage(chatId, message, { parse_mode: "HTML" });
       }
     }
   }
 };
+
 
 const fetchPlayerSessions = async (playerId) => {
   try {
