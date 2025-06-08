@@ -8,7 +8,4 @@ RUN npm install
 
 COPY . .
 
-ENV TG_TOKEN=
-ENV BM_TOKEN=
-
-CMD [ "npm", "start"]
+CMD [ "node", "start"]

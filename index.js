@@ -415,4 +415,18 @@ const getTrackedPlayersByChat = (chatId) => {
   .map(row => row.playerId);
 };
 
-setInterval(checkTrackedPlayers, 20000);
+const initTrackedPlayerStates = async () => {
+  const rows = db.prepare("SELECT DISTINCT playerId FROM tracked").all();
+
+  for (const { playerId } of rows) {
+    const session = await getPlayerLastSession(playerId);
+    if (!session) continue;
+
+    const stop = session.attributes.stop;
+    maps.trackedPlayers.set(playerId, stop);
+  }
+};
+
+await initTrackedPlayerStates();
+
+setInterval(checkTrackedPlayers, 10000);
