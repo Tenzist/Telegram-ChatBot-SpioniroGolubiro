@@ -37,6 +37,7 @@ const maps = {
   searchState: new Map(),
   searchMode: new Map(),
   trackedPlayers: new Map(),
+  playerNames: new Map(),
   playerChats: new Map()
 };
 
@@ -189,6 +190,12 @@ bot.on("callback_query", async (query) => {
 
     return bot.answerCallbackQuery(query.id);
   }
+  
+  if (data.startsWith("show_stats:")) {
+    const playerId = data.split(":")[1];
+    await checkPlayerInfo(playerId, chatId, true);
+    return bot.answerCallbackQuery(query.id);
+  }
 
   if (!state) return bot.answerCallbackQuery(query.id, { text: "Поиск не найден." });
 
@@ -209,10 +216,10 @@ bot.on("callback_query", async (query) => {
     return bot.answerCallbackQuery(query.id);
   }
 
-if (data.startsWith("player:")) {
-    await checkPlayerInfo(data.split(":")[1], chatId, false); 
+  if (data.startsWith("player:")) {
+    await checkPlayerInfo(data.split(":")[1], chatId, false);
     return bot.answerCallbackQuery(query.id);
-}
+  }
 
   if (data === "cancel") {
     bot.sendMessage(chatId, "❎ Отмена.");
@@ -226,14 +233,8 @@ if (data.startsWith("player:")) {
     return bot.answerCallbackQuery(query.id);
   }
 
-if (data.startsWith("show_stats:")) {
-    const playerId = data.split(":")[1];
-    await checkPlayerInfo(playerId, chatId, true); 
-    return bot.answerCallbackQuery(query.id);
-}
 
 
-  
 
   if (data.startsWith("stop:")) {
     const playerIdToRemove = data.split(":")[1];
@@ -302,15 +303,24 @@ const getServerName = async (serverId) => {
   }
 };
 
-const getPlayerLastSession = async (playerId) => {
-  try {
-    const res = await fetchPlayerSessions(playerId);
-    return (await res.json()).data?.[0] || null;
-  } catch {
-    return null;
+const getPlayerLastSession = async (playerId, retries = 3) => {
+  for (let i = 0; i < retries; i++) {
+    try {
+      const res = await fetch(`https://api.battlemetrics.com/players/${playerId}/relationships/sessions`, { headers });
+      const json = await res.json();
+      if (json.data && json.data.length > 0) {
+        return json.data[0];
+      }
+    } catch (error) {
+      console.warn(`Попытка ${i + 1} - Ошибка при получении сессий игрока ${playerId}:`, error.message);
+      if (i < retries - 1) {
+        await new Promise(resolve => setTimeout(resolve, 1000 * (i + 1))); // Ждем 1, 2, 3 секунды
+      }
+    }
   }
+  console.error(`Не удалось получить сессии для игрока ${playerId} после ${retries} попыток.`);
+  return null;
 };
-
 const getSessionServerName = async (session) => {
   try {
     const serverId = session.relationships?.server?.data?.id;
@@ -367,54 +377,54 @@ const getUniqueServers = async (playerId, maxServers = 3) => {
   }
 };
 const checkPlayerInfo = async (playerId, chatId, isTrackedContext = false) => {
-    try {
-        const res = await fetchPlayerSessions(playerId);
-        const session = (await res.json()).data?.[0];
+  try {
+    const res = await fetchPlayerSessions(playerId);
+    const session = (await res.json()).data?.[0];
 
-        if (!session) {
-            return bot.sendMessage(chatId, "Сессии не найдены.");
-        }
-
-        const { stop, name } = session.attributes;
-        const id = session.relationships.player.data.id;
-
-        const uniqueServers = await getUniqueServers(playerId, 5);
-
-        const statusText = stop ? `Игрок был в сети ${utils.getLastSeen(stop)}` : `Сейчас в сети`;
-
-        let serversMessage = "";
-        if (uniqueServers.length > 0) {
-            serversMessage = "\n\n🌐 **Последние сервера:**\n";
-            serversMessage += uniqueServers.map(server => {
-                const seenText = server.lastSeen ? `(${utils.getLastSeen(server.lastSeen)})` : "В данный момент онлайн";
-                return `  • <i>${server.name}</i> ${seenText}`;
-            }).join("\n");
-        } else {
-            serversMessage = "\n\n🌐 Информация о серверах не найдена.";
-        }
-
-        const options = {
-            parse_mode: "HTML",
-            reply_markup: {
-                inline_keyboard: [] 
-            },
-            disable_web_page_preview: true
-        };
-
-        if (!isTrackedContext) { 
-            options.reply_markup.inline_keyboard.push([
-                { text: "Добавить в отслеживание", callback_data: `track:${playerId}` },
-            ]);
-        }
-
-        bot.sendMessage(chatId,
-            `<a href="https://www.battlemetrics.com/players/${id}">${name}</a>\n${statusText}${serversMessage}`,
-            options
-        );
-    } catch (error) {
-        console.error("Ошибка в checkPlayerInfo:", error);
-        bot.sendMessage(chatId, "Ошибка при получении информации об игроке.");
+    if (!session) {
+      return bot.sendMessage(chatId, "Сессии не найдены.");
     }
+
+    const { stop, name } = session.attributes;
+    const id = session.relationships.player.data.id;
+
+    const uniqueServers = await getUniqueServers(playerId, 5);
+
+    const statusText = stop ? `Игрок был в сети ${utils.getLastSeen(stop)}` : `Сейчас в сети`;
+
+    let serversMessage = "";
+    if (uniqueServers.length > 0) {
+      serversMessage = "\n\n🌐 **Последние сервера:**\n";
+      serversMessage += uniqueServers.map(server => {
+        const seenText = server.lastSeen ? `(${utils.getLastSeen(server.lastSeen)})` : "В данный момент онлайн";
+        return `  • <i>${server.name}</i> ${seenText}`;
+      }).join("\n");
+    } else {
+      serversMessage = "\n\n🌐 Информация о серверах не найдена.";
+    }
+
+    const options = {
+      parse_mode: "HTML",
+      reply_markup: {
+        inline_keyboard: []
+      },
+      disable_web_page_preview: true
+    };
+
+    if (!isTrackedContext) {
+      options.reply_markup.inline_keyboard.push([
+        { text: "Добавить в отслеживание", callback_data: `track:${playerId}` },
+      ]);
+    }
+
+    bot.sendMessage(chatId,
+      `<a href="https://www.battlemetrics.com/players/${id}">${name}</a>\n${statusText}${serversMessage}`,
+      options
+    );
+  } catch (error) {
+    console.error("Ошибка в checkPlayerInfo:", error);
+    bot.sendMessage(chatId, "Ошибка при получении информации об игроке.");
+  }
 };
 
 const fetchPlayers = async (url) => {
@@ -454,13 +464,26 @@ const checkTrackedPlayers = async () => {
     if (!currentSession) continue;
 
     const currentStop = currentSession.attributes.stop;
+    const currentName = currentSession.attributes.name;
+
+    const previousName = maps.playerNames.get(playerId);
+    if (previousName && currentName && previousName !== currentName) {
+      maps.playerNames.set(playerId, currentName);
+
+      const chatRows = db.prepare("SELECT chatId FROM tracked WHERE playerId = ?").all(playerId);
+      for (const { chatId } of chatRows) {
+        bot.sendMessage(chatId, `✏️ Игрок сменил ник:\n<b>${previousName}</b> ➜ <b>${currentName}</b>`, {
+          parse_mode: "HTML"
+        });
+      }
+    }
+
     const previousStop = maps.trackedPlayers.get(playerId);
     if (previousStop !== currentStop) {
-      const playerName = await getPlayerName(playerId);
       const serverName = await getSessionServerName(currentSession);
       const message = currentStop === null
-        ? `🔔 Игрок <b>${playerName}</b> зашёл в сеть на сервер "<i>${serverName}</i>".`
-        : `🔔 Игрок <b>${playerName}</b> вышел с сервера "<i>${serverName}</i>".`;
+        ? `🔔 Игрок <b>${currentName}</b> зашёл в сеть на сервер "<i>${serverName}</i>".`
+        : `🔔 Игрок <b>${currentName}</b> вышел с сервера "<i>${serverName}</i>".`;
 
       maps.trackedPlayers.set(playerId, currentStop);
 
@@ -471,6 +494,7 @@ const checkTrackedPlayers = async () => {
     }
   }
 };
+
 
 
 const fetchPlayerSessions = async (playerId) => {
@@ -505,8 +529,12 @@ const initTrackedPlayerStates = async () => {
 
     const stop = session.attributes.stop;
     maps.trackedPlayers.set(playerId, stop);
+
+    const name = session.attributes.name;
+    if (name) maps.playerNames.set(playerId, name);
   }
 };
+
 
 await initTrackedPlayerStates();
 
