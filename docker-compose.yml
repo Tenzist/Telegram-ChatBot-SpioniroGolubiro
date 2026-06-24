@@ -5,5 +5,6 @@ services:
     build: .
     container_name: spioniro
     restart: always
-    env_file:
-      - .env
+    environment:
+      TG_TOKEN: ${TG_TOKEN}
+      BM_TOKEN: ${BM_TOKEN}
