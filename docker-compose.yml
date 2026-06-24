@@ -1,0 +1,9 @@
+version: "3.9"
+
+services:
+  spioniro:
+    build: .
+    container_name: spioniro
+    restart: always
+    env_file:
+      - .env
